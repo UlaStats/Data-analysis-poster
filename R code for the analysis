@@ -1,0 +1,189 @@
+#1. Check the distribution of the response variable
+#2. Fitted Poisson regression with link = log. Since the residuals were slightly skewed to the right, a log transformation provided a better fit 
+#3. The model fit improved, but overdispersion still appeared to be an issue
+#4. I introduced a dispersion parameter to be able to identify the correct variables 
+
+
+
+#Advanced Data Analysis: Assignment 1
+
+library(ggplot2)
+library(MASS)
+
+
+FIES <- read.csv("dataset4.csv")
+attach(FIES)
+
+#Exploratory Analysis
+
+str(FIES)
+
+FIES <-FIES[,-2] #Column 'Region' is removed as all regions are the same 'XII - SOCCSKSARGEN'
+
+FIES <- FIES[,c(6,1,2,3,4,5,7,8,9,10)] #Here, the response is set to be the first column
+
+FIES$Electricity <- as.factor(FIES$Electricity) #The electricity variable is converted to a factor
+
+any(is.na(FIES)) #No missing values
+
+
+ggplot(data = FIES, aes(x = Total.Number.of.Family.members)) +
+  geom_density(alpha = 0.8, color = "#045a8d", size = 1) +
+  ylab('f(y)') +
+  xlab('y') +
+  theme(axis.text=element_text(size=18),
+        axis.title=element_text(size=18,face="bold"))
+
+
+#Comment:
+#This confirms that the Total Number of Family Members follows Poisson distribution
+#The parameter of this dis is:
+mean(FIES$Total.Number.of.Family.members)
+
+
+library(corrplot)
+
+continuous.FIES <- FIES[,c(-4,-6, -10)] #Removes the categorical variables (only want continuous variables for the correlation cofficient)
+
+corr.continuous.FIES <- cor(continuous.FIES)
+
+corrplot(corr.continuous.FIES, type = 'lower', method = 'number') 
+
+#Comment:
+#Appers like none of the continous explanatory variables are highly correlated
+#No collinearity detected
+
+
+ggplot(data = FIES, aes(x = Household.Head.Sex, y = Total.Number.of.Family.members)) +
+  geom_boxplot(aes(colour = Household.Head.Sex)) 
+
+ggplot(data = FIES, aes(x = Type.of.Household, y = Total.Number.of.Family.members)) +
+  geom_boxplot(aes(colour = Type.of.Household))
+
+ggplot(data = FIES, aes(x = Electricity, y = Total.Number.of.Family.members)) +
+  geom_boxplot(aes(colour = Electricity))
+
+#Comment:
+#Household Head's Sex, Type of Household and Electricity all included as predictors in our analysis
+
+## Formal Data Analysis
+
+
+model1 <- glm(formula = Total.Number.of.Family.members ~ . , family = poisson(link = "sqrt"), data = FIES)
+summary(model1) 
+
+
+
+#Comment: 
+#Residual deviance relatively small compared to 2111 
+
+Pearson.chisq.statistic1 <- sum(resid(model1, type = 'pearson')^2)
+
+qchisq(p = 0.95, df = model1$df.residual)
+
+Pearson.chisq.statistic1
+
+#Comment:
+#The 95th percentile of the chisq distribution equals to 2219.002
+#Our Pearson chi-squared statistic is smaller than 2219.002
+#Hence, we fail to reject the null hypothesis
+#We conclude the model fits the data well
+
+#Assumption checking:
+
+stand.residuals.model1 <- rstandard(model1, type ='pearson')
+
+qqnorm(stand.residuals.model1)
+qqline(stand.residuals.model1, col = 2)
+
+
+ggplot(model1, aes(x = stand.residuals.model1)) +
+  geom_histogram()
+
+
+#Comment:
+#From the qq plot and the histogram it appears as if the residuals were slightly skewed to the right
+
+
+fitted.model1 <- model1$fitted.values
+
+variance.model1 <- (FIES$Total.Number.of.Family.members - fitted.model1)^2
+
+length(Total.Number.of.Family.members)
+
+overdispersion.data <- as.data.frame(matrix(c(fitted.model1, variance.model1), ncol = 2, nrow = 2122, byrow = FALSE))
+
+colnames(overdispersion.data) <- c('fitted.model1', 'variance.model1')
+
+ggplot(data = overdispersion.data, aes(x = fitted.model1, y = variance.model1)) +
+  geom_point(alpha = 0.2) +
+  geom_abline(slope = 1, intercept = 0, col = 'red', size = 1)
+
+#Comment:
+#Overdispersion occurs for this model. Plenty of values with variance higher than the mean (for fitted values between 2.5 and 7.5)
+
+#Log transformed model:
+
+log.model1 <- glm(Total.Number.of.Family.members ~ log(Total.Household.Income) + log(Total.Food.Expenditure) + Household.Head.Sex + log(Household.Head.Age) + Type.of.Household + log(House.Floor.Area) + log(House.Age+0.1) + log(Number.of.bedrooms+0.1) + Electricity, data = FIES, family = poisson(link = 'log'))
+summary(log.model1)
+
+#Comment:
+#Better model fit with smaller residual deviance on the same number of the degrees of freedom
+
+fitted.poisson.model.log <- log.model1$fitted.values
+
+variance.poisson.model.log <- (FIES$Total.Number.of.Family.members - fitted.poisson.model.log)^2
+
+overdispersion.data.poisson.model.log <- as.data.frame(matrix(c(fitted.poisson.model.log, variance.poisson.model.log), ncol = 2, nrow = 2122, byrow = FALSE))
+
+
+dev.off()
+ggplot(data = overdispersion.data.poisson.model.log, aes(x = V1, y = V2)) +
+  geom_point(alpha = 0.2) +
+  geom_abline(slope = 1, intercept = 0, col = 'red', size = 1)
+
+#Comment:
+#Overdispersion still appears to be an issue
+
+stnd.res.log.model1 <- rstandard(log.model1, type = 'pearson') 
+
+plot(stnd.res.log.model1, ylab = 'Standardised residuals')
+abline(a = 0, b= 0, col = 'red')
+
+#Comment:
+#There is still some unexplained variability in our data
+#Plenty of residuals larger than 2 
+
+qqnorm(stnd.res.log.model1)
+qqline(stnd.res.log.model1, col = 2)
+
+
+
+#We fit quassi poisson to the model with log-transformed covariates:
+#The quasi-poisson model ams to adjust for overdispersion
+
+quasi.poisson.model <- glm(Total.Number.of.Family.members ~ log(Total.Household.Income) + log(Total.Food.Expenditure) + Household.Head.Sex + log(Household.Head.Age) + Type.of.Household + log(House.Floor.Area) + log(House.Age+0.1) + log(Number.of.bedrooms+0.1) + Electricity, family = quasipoisson(link = 'log'), data = FIES)
+
+#Mistake
+stnd.res.quasi.poisson.model <- rstandard(quasi.poisson.model, type = 'pearson')
+
+plot(stnd.res.quasi.poisson.model)
+
+summary(quasi.poisson.model)
+
+#Mistake:
+drop1(quasi.poisson.model, test = 'F')
+
+quasi.poisson.model$null.deviance - quasi.poisson.model$deviance
+
+qchisq(df = 10, p = 0.95)
+
+#Comment:
+#913.31 > 18.31
+#Hence, we reject the null model
+
+
+#Comment:
+#Residual deviance for the quasi-poisson model with log transforms is smaller  
+
+# No need to fit negative binomial, since sufficient fit obtained
